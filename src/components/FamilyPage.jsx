@@ -1,6 +1,8 @@
 import { VOTERS, BY_NO, LINKS, GHOSTS } from "../lib/data.js";
-import { current } from "../lib/useEdits.js";
 import { go } from "../lib/useHashRoute.js";
+import { sex } from "../lib/stats.js";
+import { Avatar } from "./VoterCard.jsx";
+import Icon from "./Icon.jsx";
 
 // Builds the family as a tree: each box is a person with the wives who name him;
 // children hang below. Relatives who are not on the voter list appear in grey.
@@ -18,35 +20,38 @@ function buildFamily(fam) {
   return { ids, link, spousesOf, kidsOf, roots };
 }
 
-export default function FamilyTab({ voter, edits }) {
+export default function FamilyPage({ voter }) {
   const F = buildFamily(voter._fam);
   const me = voter.gp_serial_no;
-  const age = (id) => (BY_NO.get(id) ? +current(BY_NO.get(id), edits).age : 999);
+  const age = (id) => (BY_NO.get(id) ? BY_NO.get(id).age : 999);
   const seen = new Set();
 
   const role = (id) => {
     const l = F.link(id);
     if (!l) return "";
-    const female = current(BY_NO.get(id), edits).gender === "Female";
-    return l[1] === "Husband" ? (female ? "wife" : "husband") : (female ? "daughter" : "son");
+    const female = BY_NO.get(id).gender === "Female";
+    return l[1] === "Husband" ? (female ? "Wife" : "Husband") : (female ? "Daughter" : "Son");
   };
 
   const Row = ({ id }) => {
     if (id.startsWith("g")) {
       return (
         <div className="krow ghost">
-          <span className="n" lang="te">{GHOSTS[id][0]}</span>
-          <span className="m">Not on the voter list</span>
+          <span className="avatar other" aria-hidden="true">?</span>
+          <span className="kbody"><span className="n" lang="te">{GHOSTS[id][0]}</span><span className="m">Not on the voter list</span></span>
         </div>
       );
     }
-    const r = current(BY_NO.get(id), edits);
+    const o = BY_NO.get(id);
     const note = F.link(id)?.[2];
     return (
-      <button type="button" className={"krow" + (id === me ? " me" : "")} onClick={() => go("voter", id)}>
-        <span className="n" lang="te">{r.voter_name}</span>
-        <span className="m">{role(id)} · {r.age} yrs · {r.gender} · No. {id} · House {r.house_no}</span>
-        {note && <span className="m check">Check: {note}</span>}
+      <button type="button" className={"krow " + sex(o) + (id === me ? " me" : "")} onClick={() => go("voter", id, true)}>
+        <Avatar o={o} />
+        <span className="kbody">
+          <span className="n" lang="te">{o.voter_name}</span>
+          <span className="m">{[role(id), `${o.age} yrs`, `#${id}`, `House ${o.house_no}`].filter(Boolean).join(" · ")}</span>
+          {note && <span className="m check">Check: {note}</span>}
+        </span>
       </button>
     );
   };
@@ -71,26 +76,25 @@ export default function FamilyTab({ voter, edits }) {
   };
 
   const top = F.roots[0];
-  const title = top.startsWith("g") ? GHOSTS[top][0] : current(BY_NO.get(top), edits).voter_name;
+  const title = top.startsWith("g") ? GHOSTS[top][0] : BY_NO.get(top).voter_name;
   const nVoters = F.ids.filter((x) => !x.startsWith("g")).length;
 
   return (
-    <section className="panel" role="tabpanel">
-      <div className="row">
-        <button className="btn" type="button" onClick={() => go("voter", me)}>← Back to voter no. {me}</button>
-        <button className="btn" type="button" onClick={() => go("search")}>Back to results</button>
+    <div className="page">
+      <div className="topline">
+        <button type="button" className="backbtn" onClick={() => go("voter", me)}><Icon name="left" size={18} /> Voter #{me}</button>
       </div>
-      <div className="card">
-        <div>
+      <section className="card">
+        <div className="cardhead">
           <h2>Family of <span lang="te">{title}</span></h2>
-          <div className="meta">{nVoters} voter{nVoters === 1 ? "" : "s"} on the list · opened from voter no. {me}</div>
+          <span>{nVoters} voter{nVoters === 1 ? "" : "s"} on the list</span>
         </div>
         <ul className="kin">{F.roots.map((r) => <Item key={r} id={r} />)}</ul>
-        <p className="note">
-          Links are worked out from the printed father, husband or mother names at the same house number.
-          Grey names are relatives who are not on the voter list. Tap anyone to open their record.
+        <p className="source">
+          Links are worked out from the printed father, husband or mother names at the same house number, so check
+          them locally. Grey names are relatives who are not on the voter list.
         </p>
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }

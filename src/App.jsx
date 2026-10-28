@@ -1,88 +1,75 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { VOTERS, BY_NO } from "./lib/data.js";
-import { matches } from "./lib/search.js";
-import { useEdits, current } from "./lib/useEdits.js";
+import { useEffect, useMemo, useState } from "react";
+import { init, BY_NO, VOTERS } from "./lib/data.js";
+import { resume, lock } from "./lib/crypto.js";
+import { applyFilters, EMPTY } from "./lib/stats.js";
 import { useHashRoute, go } from "./lib/useHashRoute.js";
-import SearchTab from "./components/SearchTab.jsx";
-import VoterTab from "./components/VoterTab.jsx";
-import FamilyTab from "./components/FamilyTab.jsx";
-import EditsTab from "./components/EditsTab.jsx";
+import { PAGE_SIZE } from "./config.js";
+import Login from "./components/Login.jsx";
+import Dashboard from "./components/Dashboard.jsx";
+import VotersPage from "./components/VotersPage.jsx";
+import VoterPage from "./components/VoterPage.jsx";
+import FamilyPage from "./components/FamilyPage.jsx";
+import Analysis from "./components/Analysis.jsx";
+import Icon from "./components/Icon.jsx";
 
 export default function App() {
-  const { edits, setEdits, setOne, saveFailed } = useEdits();
+  const [state, setState] = useState("checking");
+  useEffect(() => {
+    resume().then((raw) => { if (raw) init(raw); setState(raw ? "ready" : "locked"); });
+  }, []);
+
+  if (state === "checking") return <div className="splash"><span className="spinner big" /></div>;
+  if (state === "locked") return <Login onUnlock={(raw) => { init(raw); setState("ready"); }} />;
+  return <Main onLogout={() => { lock(); setState("locked"); go("home"); }} />;
+}
+
+const NAV = [
+  { id: "home", label: "Dashboard", icon: "home" },
+  { id: "voters", label: "Voters", icon: "users" },
+  { id: "analysis", label: "Analysis", icon: "chart" },
+];
+
+function Main({ onLogout }) {
   const route = useHashRoute();
-  const [filters, setFilters] = useState({ q: "", hab: "", ward: "", gen: "", editedOnly: false });
-  const [page, setPage] = useState(0);
-  const [toast, setToast] = useState("");
-  const toastTimer = useRef(null);
-  const say = (msg) => {
-    setToast(msg);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 2600);
-  };
+  const [filters, setFilters] = useState(EMPTY);
+  const [shown, setShown] = useState(PAGE_SIZE);
+  const results = useMemo(() => applyFilters(VOTERS, filters), [filters]);
+  useEffect(() => setShown(PAGE_SIZE), [filters]);
 
-  const results = useMemo(() => VOTERS.filter((o) => {
-    const r = current(o, edits);
-    if (filters.hab && String(o.habitation_no) !== filters.hab) return false;
-    if (filters.ward && String(r.ward_no) !== filters.ward) return false;
-    if (filters.gen && r.gender !== filters.gen) return false;
-    if (filters.editedOnly && !edits[o.gp_serial_no]) return false;
-    return matches(r, o, filters.q);
-  }), [filters, edits]);
-
-  useEffect(() => setPage(0), [filters]);
-
+  const openList = (f) => { setFilters({ ...EMPTY, ...f }); go("voters", null, true); };
   const selected = route.no ? BY_NO.get(route.no) : null;
-  const tab = (route.tab === "voter" || route.tab === "family") && !selected ? "search" : route.tab;
-  const nEdited = Object.keys(edits).length;
+  const tab = (route.tab === "voter" || route.tab === "family") && !selected ? "voters" : route.tab;
+  const section = tab === "voter" || tab === "family" ? "voters" : tab;
 
-  const tabs = [
-    { id: "search", label: "Search" },
-    { id: "voter", label: "Voter", needs: true },
-    { id: "family", label: "Family", needs: true },
-    { id: "edits", label: nEdited ? `Edits (${nEdited})` : "Edits" },
-  ];
+  const navButtons = NAV.map((n) => (
+    <button key={n.id} type="button" className="navbtn" aria-current={section === n.id ? "page" : undefined}
+      onClick={() => go(n.id)}>
+      <Icon name={n.icon} size={22} /><span>{n.label}</span>
+    </button>
+  ));
 
   return (
-    <div className="wrap">
-      <header>
-        <div>
-          <h1>Vedagirivaripalle voter register</h1>
-          <p className="sub" lang="te">వేదగిరివారిపల్లె గ్రామ పంచాయతీ ఓటర్ల జాబితా 2026</p>
-        </div>
-        <div className="counts">{VOTERS.length.toLocaleString("en-IN")} voters · {nEdited} edited</div>
+    <div className="app">
+      <header className="appbar">
+        <button type="button" className="brand" onClick={() => go("home")}>
+          <span className="logo"><Icon name="users" size={18} /></span>
+          <span><b>Vedagirivaripalle</b><small>Voter register 2026</small></span>
+        </button>
+        <nav className="topnav" aria-label="Sections">{navButtons}</nav>
+        <button type="button" className="signout" onClick={onLogout}>
+          <Icon name="logout" size={18} /><span>Sign out</span>
+        </button>
       </header>
 
-      <nav className="tabs" role="tablist" aria-label="Sections">
-        {tabs.map((t) => (
-          <button key={t.id} className="tab" role="tab" type="button"
-            aria-selected={tab === t.id} disabled={t.needs && !selected}
-            onClick={() => go(t.id, t.needs ? selected?.gp_serial_no : null)}>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <main>
+        {tab === "home" && <Dashboard openList={openList} />}
+        {tab === "voters" && <VotersPage filters={filters} setFilters={setFilters} results={results} shown={shown} setShown={setShown} />}
+        {tab === "voter" && <VoterPage key={selected.gp_serial_no} voter={selected} results={results} />}
+        {tab === "family" && <FamilyPage voter={selected} />}
+        {tab === "analysis" && <Analysis openList={openList} />}
+      </main>
 
-      {saveFailed && (
-        <p className="warn">This browser is not saving edits. Export the CSV from the Edits tab before you leave.</p>
-      )}
-
-      {tab === "search" && (
-        <SearchTab filters={filters} setFilters={setFilters} results={results}
-          page={page} setPage={setPage} edits={edits} />
-      )}
-      {tab === "voter" && (
-        <VoterTab key={selected.gp_serial_no} voter={selected} edits={edits} setOne={setOne}
-          results={results} say={say} />
-      )}
-      {tab === "family" && <FamilyTab voter={selected} edits={edits} />}
-      {tab === "edits" && <EditsTab edits={edits} setEdits={setEdits} say={say} />}
-
-      <footer className="note">
-        Source: AP State Election Commission, Gram Panchayat voter list, published 15-04-2026. Ages as on 01-01-2026.
-        Family links are worked out from the printed relative names and should be checked locally.
-      </footer>
-      {toast && <div className="toast" role="status">{toast}</div>}
+      <nav className="bottomnav" aria-label="Sections">{navButtons}</nav>
     </div>
   );
 }
